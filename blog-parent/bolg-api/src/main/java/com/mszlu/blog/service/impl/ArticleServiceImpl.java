@@ -1,7 +1,10 @@
 package com.mszlu.blog.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mszlu.blog.dao.dos.Archives;
 import com.mszlu.blog.dao.mapper.ArticleBodyMapper;
@@ -13,18 +16,17 @@ import com.mszlu.blog.dao.pojo.ArticleTag;
 import com.mszlu.blog.dao.pojo.SysUser;
 import com.mszlu.blog.service.*;
 import com.mszlu.blog.util.UserThreadLocal;
-import com.mszlu.blog.vo.ArticleBodyVo;
-import com.mszlu.blog.vo.ArticleVo;
-import com.mszlu.blog.vo.Result;
-import com.mszlu.blog.vo.TagVo;
+import com.mszlu.blog.vo.*;
 import com.mszlu.blog.vo.params.ArticleParam;
 import com.mszlu.blog.vo.params.PageParams;
+import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.joda.time.DateTime;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 
 @Service
@@ -41,6 +43,9 @@ public class ArticleServiceImpl implements ArticleService {
 
     @Autowired
     private ArticleTagMapper articleTagMapper;
+
+    @Autowired
+    private RocketMQTemplate rocketMQTemplate;
 
 
     @Override
@@ -156,21 +161,39 @@ public class ArticleServiceImpl implements ArticleService {
         *
         * */
         Article article = new Article();
-        article.setAuthorId(sysUser.getId());
-        article.setWeight(Article.Article_Common);
-        article.setViewCounts(0);
-        article.setTitle(articleParam.getTitle());
-        article.setSummary(articleParam.getSummary());
-        article.setCommentCounts(0);
-        article.setCreateDate(System.currentTimeMillis());
-        article.setCategoryId(Long.parseLong(articleParam.getCategory().getId()));
-        //插入之后会生成一个文章id
-        this.articleMapper.insert(article);
+        boolean isEdit = false;
+        if(articleParam.getId() != null){
+            article = new Article();
+            article.setId(articleParam.getId());
+            article.setTitle(articleParam.getTitle());
+            article.setSummary(articleParam.getSummary());
+            article.setCategoryId(Long.parseLong(articleParam.getCategory().getId()));
+            articleMapper.updateById(article);
+            isEdit = true;
+        }else {
+            article.setAuthorId(sysUser.getId());
+            article.setWeight(Article.Article_Common);
+            article.setViewCounts(0);
+            article.setTitle(articleParam.getTitle());
+            article.setSummary(articleParam.getSummary());
+            article.setCommentCounts(0);
+            article.setCreateDate(System.currentTimeMillis());
+            article.setCategoryId(Long.parseLong(articleParam.getCategory().getId()));
+            //插入之后会生成一个文章id
+            this.articleMapper.insert(article);
+            isEdit = false;
+        }
         //tag
         List<TagVo> tags = articleParam.getTags();
         if (tags != null){
             for (TagVo tag : tags) {
                 Long articleId = article.getId();
+                if (isEdit){
+                    //先删除
+                    LambdaQueryWrapper<ArticleTag> queryWrapper = Wrappers.lambdaQuery();
+                    queryWrapper.eq(ArticleTag::getArticleId,articleId);
+                    articleTagMapper.delete(queryWrapper);
+                }
                 ArticleTag articleTag = new ArticleTag();
                 articleTag.setTagId(Long.parseLong(tag.getId()));
                 articleTag.setArticleId(articleId);
@@ -179,18 +202,49 @@ public class ArticleServiceImpl implements ArticleService {
             }
         }
         //body
-        ArticleBody articleBody = new ArticleBody();
-        articleBody.setArticleId(article.getId());
-        articleBody.setContent(articleParam.getBody().getContent());
-        articleBody.setContent(articleParam.getBody().getContentHtml());
-        //插入之后会生成一个BodyId
-        articleBodyMapper.insert(articleBody);
+        if (isEdit){
+            ArticleBody articleBody = new ArticleBody();
+            articleBody.setArticleId(article.getId());
+            articleBody.setContent(articleParam.getBody().getContent());
+            articleBody.setContent(articleParam.getBody().getContentHtml());
+            LambdaUpdateWrapper<ArticleBody> updateWrapper = Wrappers.lambdaUpdate();
+            updateWrapper.eq(ArticleBody::getArticleId,article.getId());
+            articleBodyMapper.update(articleBody,updateWrapper);
+        }else {
+            ArticleBody articleBody = new ArticleBody();
+            articleBody.setArticleId(article.getId());
+            articleBody.setContent(articleParam.getBody().getContent());
+            articleBody.setContentHtml(articleParam.getBody().getContentHtml());
+            articleBodyMapper.insert(articleBody);
+            article.setBodyId(articleBody.getId());
+            articleMapper.updateById(article);
+        }
+        HashMap<String, String> map = new HashMap<>();
+        map.put("id",article.getId().toString());
 
-        article.setBodyId(articleBody.getId());
-        articleMapper.updateById(article);
-        ArticleVo articleVo = new ArticleVo();
-        articleVo.setId(String.valueOf(article.getId()));
-        return Result.success(articleVo);
+        if (isEdit){
+            //发送一条消息给rocketmq 当前文章更新了，更新一下缓存吧
+            ArticleMessage articleMessage = new ArticleMessage();
+            articleMessage.setArticleId(article.getId());
+            rocketMQTemplate.convertAndSend("blog-update-article",articleMessage);
+        }
+        return Result.success(map);
+
+    }
+
+    @Override
+    public Boolean updateNumById(Article article) {
+        return articleMapper.updateNumById(article) > 0;
+    }
+
+    @Override
+    public List<Article> findArticleAll() {
+        return articleMapper.selectList(null);
+    }
+
+    @Override
+    public Article getArticleById(Long articleId) {
+        return articleMapper.selectById(articleId);
     }
 
     private List<ArticleVo> copyList(List<Article> records,boolean isTag,boolean isAuthor) {

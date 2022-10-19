@@ -46,7 +46,7 @@ public class ArticleController {
     * 最新文章
     * */
     @PostMapping("new")
-    @Cache(expire = 5 * 60 * 1000,name = "news_article")
+    @Cache(expire = 5 * 60 * 1000,name = "views_article")
     public Result newArticles(){
         int limit = 5;
         return articleService.newArticles(limit);
@@ -63,6 +63,7 @@ public class ArticleController {
     *
     * */
     @PostMapping("view/{id}")
+    @Cache(expire = 5 * 60 * 1000,name = "news_article")
     public Result findArticleById(@PathVariable("id") Long articleId){
         return articleService.findArticleById(articleId);
     }
@@ -76,5 +77,8 @@ public class ArticleController {
         return articleService.publish(articleParam);
     }
 
-
+    @PostMapping("{id}")
+    public Result articleById(@PathVariable("id") Long articleId){
+        return articleService.findArticleById(articleId);
+    }
 }

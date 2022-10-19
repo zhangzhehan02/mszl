@@ -15,6 +15,21 @@
         <result column="body_id" property="bodyId"/>
         <result column="category_id" property="categoryId"/>
     </resultMap>
+    <!--        int updateNumById(Article article);-->
+    <update id="updateNumById">
+        update ms_article
+        <set>
+            <if test="viewCounts != null">
+                view_counts = #{viewCounts},
+            </if>
+            <if test="commentCounts != null">
+                comment_counts = #{commentCounts}
+            </if>
+        </set>
+        <where>
+            id = #{id}
+        </where>
+    </update>
 
     <select id="listArchives" resultType="com.mszlu.blog.dao.dos.Archives">
         select year(FROM_UNIXTIME(create_date/1000)) as year,month(FROM_UNIXTIME(create_date/1000)) as month,count(*) as count

@@ -1,8 +1,11 @@
 package com.mszlu.blog.service;
 
+import com.mszlu.blog.dao.pojo.Article;
 import com.mszlu.blog.vo.Result;
 import com.mszlu.blog.vo.params.ArticleParam;
 import com.mszlu.blog.vo.params.PageParams;
+
+import java.util.List;
 
 public interface ArticleService {
 
@@ -35,4 +38,22 @@ public interface ArticleService {
     * */
     Result publish(ArticleParam articleParam);
 
+    /**
+     * 更新（浏览量，评论数）
+     * @param article
+     */
+    Boolean updateNumById(Article article);
+
+    /**
+     * 获取所有文章详情
+     * @return
+     */
+    List<Article> findArticleAll();
+
+    /**
+    * 获取文章详情
+    * @param articleId
+    * @return
+    */
+    Article getArticleById(Long articleId);
 }
